@@ -1,0 +1,79 @@
+classDiagram
+
+class Owner {
+  +UUID owner_id
+  +String name
+  +String contact_info
+  +Preferences preferences
+  +addPet(p: Pet)
+  +removePet(p: Pet)
+}
+
+class Pet {
+  +UUID pet_id
+  +String name
+  +String species
+  +int age
+  +Owner owner
+  +getAge(): int
+}
+
+class PetCareTask {
+  +UUID task_id
+  +String title
+  +int duration_minutes
+  +Priority priority
+  +UUID pet_id
+  +String notes
+  +isHighPriority(): bool
+}
+
+class Schedule {
+  +date
+  +list~TimeSlot~ time_slots
+  +generate(): Schedule
+  +explain(): String
+}
+
+class TimeSlot {
+  +start_time
+  +end_time
+  +UUID task_id
+  +String status  "planned|completed|skipped"
+}
+
+class Preference {
+  +entity_id
+  +list~TimeWindow~ preferred_time_windows
+  +int max_daily_time_minutes
+}
+
+class Constraint {
+  +type  "time_budget|unavailable_window|must_after"
+  +parameters
+}
+
+class Scheduler {
+  +scheduleTasks(tasks, preferences, constraints): Schedule
+  +optimizeByPriority(): void
+}
+
+class Priority {
+  <<enumeration>>
+  +LOW
+  +MEDIUM
+  +HIGH
+}
+
+%% Relationships
+Owner "1" *-- "0..*" Pet : owns
+Pet "1" *-- "0..*" PetCareTask : has
+Schedule "1" *-- "0..*" TimeSlot : contains
+TimeSlot "1" --> "1" PetCareTask : assignedTo
+Scheduler ..> PetCareTask : uses
+Scheduler ..> Preference : uses
+Scheduler ..> Constraint : uses
+Preference "0..*" o-- "1" Pet : appliesTo
+
+%% Notes
+note for Scheduler "Service that produces a Schedule from tasks, preferences and constraints"
