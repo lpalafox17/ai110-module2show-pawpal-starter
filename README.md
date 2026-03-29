@@ -52,3 +52,17 @@ This project includes a small scheduling engine with several improvements over a
 - Conflict detection: the scheduler performs lightweight overlap checks and returns readable warnings rather than crashing; this keeps the UX informative while remaining simple.
 
 These features are implemented in `pawpal_system.py` and demonstrated by `main.py`. They are intentionally lightweight and easy to extend as the app's requirements grow.
+
+## Testing PawPal+
+
+Run the automated test suite with:
+
+```bash
+python -m pytest
+```
+
+What the tests cover:
+- Core dataclass behaviors (task completion, adding tasks to pets).
+- Scheduler behaviors: sorting tasks by time, generating daily recurring tasks, and detecting scheduling conflicts.
+
+Confidence Level: ★★★★☆ (4/5) — All current tests pass locally (unit tests exercise core behaviors and edge cases like duplicate times and recurrence), but the scheduler is intentionally simple and would benefit from additional integration and performance tests before production use.
