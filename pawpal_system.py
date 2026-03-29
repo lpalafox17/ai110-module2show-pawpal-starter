@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
-from datetime import datetime, date
+from datetime import datetime, date, timedelta, time
 from enum import Enum
 from typing import List, Optional, Dict, Any
 import uuid
@@ -46,9 +46,21 @@ class PetCareTask:
     priority: Priority = Priority.MEDIUM
     pet_id: Optional[str] = None
     notes: Optional[str] = None
+    scheduled_time: Optional[datetime] = None
+    frequency: Optional[str] = None  # free-form (e.g., "daily", "weekly")
+    completed: bool = False
 
     def is_high_priority(self) -> bool:
+        """Return True when this task has high priority."""
         return self.priority == Priority.HIGH
+
+    def mark_completed(self) -> None:
+        """Mark the task as completed."""
+        self.completed = True
+
+    def is_pending(self) -> bool:
+        """Return True when the task has not been completed yet."""
+        return not self.completed
 
 
 @dataclass
@@ -78,6 +90,22 @@ class Pet:
     species: Optional[str] = None
     age: Optional[int] = None
     owner_id: Optional[str] = None
+    tasks: List[PetCareTask] = field(default_factory=list)
+
+    def add_task(self, task: PetCareTask) -> None:
+        """Attach a PetCareTask to this pet."""
+        task.pet_id = self.id
+        self.tasks.append(task)
+
+    def remove_task(self, task_id: str) -> None:
+        """Remove a task from this pet by id."""
+        self.tasks = [t for t in self.tasks if t.id != task_id]
+
+    def get_tasks(self, include_completed: bool = False) -> List[PetCareTask]:
+        """Return this pet's tasks; optionally include completed ones."""
+        if include_completed:
+            return list(self.tasks)
+        return [t for t in self.tasks if not t.completed]
 
 
 @dataclass
@@ -89,10 +117,24 @@ class Owner:
     pets: List[Pet] = field(default_factory=list)
 
     def add_pet(self, pet: Pet) -> None:
-        raise NotImplementedError()
+        """Add a Pet to this owner and set ownership."""
+        pet.owner_id = self.id
+        self.pets.append(pet)
 
     def remove_pet(self, pet_id: str) -> None:
-        raise NotImplementedError()
+        """Remove a Pet from this owner by id."""
+        self.pets = [p for p in self.pets if p.id != pet_id]
+
+    def get_all_pets(self) -> List[Pet]:
+        """Return a list of this owner's pets."""
+        return list(self.pets)
+
+    def get_all_tasks(self, include_completed: bool = False) -> List[PetCareTask]:
+        """Aggregate tasks from all pets owned by this owner."""
+        tasks: List[PetCareTask] = []
+        for p in self.pets:
+            tasks.extend(p.get_tasks(include_completed=include_completed))
+        return tasks
 
 
 class Scheduler:
@@ -102,7 +144,53 @@ class Scheduler:
         preferences: Optional[List[Preference]] = None,
         constraints: Optional[List[Constraint]] = None,
     ) -> Schedule:
-        raise NotImplementedError()
+        """Produce a Schedule by greedily placing pending tasks into the day."""
+        # Simple greedy scheduler that fills the day sequentially.
+        # Default working window: 08:00 - 20:00
+        if not tasks:
+            return Schedule(date=date.today(), time_slots=[])
+
+        # Filter pending tasks
+        pending = [t for t in tasks if not t.completed]
+        # Order by priority (HIGH first) then shorter duration first
+        pending = self.optimize_by_priority(pending)
+
+        day = date.today()
+        start_dt = datetime.combine(day, time(hour=8, minute=0))
+        end_dt = datetime.combine(day, time(hour=20, minute=0))
+
+        slots: List[TimeSlot] = []
+        cursor = start_dt
+
+        for task in pending:
+            needed = timedelta(minutes=task.duration_minutes)
+            if cursor + needed > end_dt:
+                # no room left in the day
+                break
+            slot = TimeSlot(start_time=cursor, end_time=cursor + needed, task_id=task.id)
+            slots.append(slot)
+            task.scheduled_time = cursor
+            cursor = cursor + needed
+
+        return Schedule(date=day, time_slots=slots)
 
     def optimize_by_priority(self, tasks: List[PetCareTask]) -> List[PetCareTask]:
-        raise NotImplementedError()
+        """Return tasks ordered by priority and duration (high/short first)."""
+        # Sort by priority (HIGH first), then by duration (shorter first)
+        priority_value = {Priority.HIGH: 0, Priority.MEDIUM: 1, Priority.LOW: 2}
+        return sorted(tasks, key=lambda t: (priority_value.get(t.priority, 1), t.duration_minutes))
+
+    def schedule_for_owner(
+        self,
+        owner: Owner,
+        for_date: Optional[date] = None,
+        preferences: Optional[List[Preference]] = None,
+        constraints: Optional[List[Constraint]] = None,
+    ) -> Schedule:
+        """Gather tasks from an Owner and produce a Schedule for them."""
+        # Gather tasks from owner and schedule them
+        tasks = owner.get_all_tasks(include_completed=False)
+        if for_date:
+            # for now we ignore recurrence and date filtering
+            pass
+        return self.schedule_tasks(tasks, preferences=preferences, constraints=constraints)
