@@ -5,12 +5,14 @@
 **a. Initial design**
 
 - Briefly describe your initial UML design.
+My initial UML design model consisted of simple classess while keeping scheduling logic sepereate from data. Core entities like owner, pet, and task store essential informatio while scheudlker generates a schedule made up of timeslots.
 - What classes did you include, and what responsibilities did you assign to each?
-
+The classes I included are Pet, owner and they hold data, while preference, constraint and time are all classess that define rules, and scheduler handles all decsion making, like prioritizing tasks and enforcing constraints. 
 **b. Design changes**
 
 - Did your design change during implementation?
 - If yes, describe at least one change and why you made it.
+
 
 ---
 
