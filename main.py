@@ -44,7 +44,13 @@ if __name__ == '__main__':
     t2 = PetCareTask(title="Feed Breakfast", duration_minutes=10, priority=Priority.MEDIUM)
     t3 = PetCareTask(title="Play Session", duration_minutes=20, priority=Priority.LOW)
 
-    # assign tasks to pets
+    # assign tasks to pets (add out-of-order times)
+    # set scheduled_time values so tasks are intentionally out-of-order
+    t1.scheduled_time = datetime.combine(datetime.today(), datetime.strptime("09:00", "%H:%M").time())
+    t2.scheduled_time = datetime.combine(datetime.today(), datetime.strptime("08:30", "%H:%M").time())
+    # Make t3 conflict with t1 by scheduling it at the same time as t1
+    t3.scheduled_time = datetime.combine(datetime.today(), datetime.strptime("09:00", "%H:%M").time())
+
     dog.add_task(t1)
     dog.add_task(t2)
     cat.add_task(t3)
@@ -58,5 +64,28 @@ if __name__ == '__main__':
     sched = Scheduler()
     schedule = sched.schedule_for_owner(owner)
 
-    # print schedule
+    # print schedule (greedy result)
     format_schedule(schedule, tasks_by_id, pets_by_id)
+
+    # print any warnings produced by the scheduler
+    if getattr(schedule, 'warnings', None):
+        print("\nScheduler warnings:")
+        for w in schedule.warnings:
+            print(" -", w)
+
+    # Demonstrate sorting by scheduled_time using Scheduler.sort_by_time
+    print("\nTasks sorted by scheduled_time:")
+    all_tasks = owner.get_all_tasks(include_completed=True)
+    sorted_tasks = sched.sort_by_time(all_tasks)
+    for t in sorted_tasks:
+        stime = t.scheduled_time.strftime("%H:%M") if t.scheduled_time else "(no time)"
+        pet = pets_by_id.get(t.pet_id)
+        pet_name = pet.name if pet else "(unknown)"
+        print(f" - {stime}: {t.title} [{pet_name}]")
+
+    # Demonstrate filtering: only tasks for Buddy
+    print("\nFiltered tasks (pet=Buddy):")
+    filtered = sched.filter_tasks(owner, pet_name="Buddy", completed=False)
+    for t in filtered:
+        stime = t.scheduled_time.strftime("%H:%M") if t.scheduled_time else "(no time)"
+        print(f" - {stime}: {t.title} [Buddy]")

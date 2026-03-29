@@ -28,6 +28,10 @@ The classes I included are Pet, owner and they hold data, while preference, cons
 - Describe one tradeoff your scheduler makes.
 - Why is that tradeoff reasonable for this scenario?
 
+One tradeoff I made is keeping conflict detection lightweight and easy to read rather than using a more optimal but more complex algorithm. The current implementation performs pairwise interval checks (O(n^2)) to detect overlapping TimeSlots and returns human-readable warnings. I shared this method with an AI assistant; it suggested a "sweep-line" approach (sort start/end events and scan once) which would reduce complexity to O(n log n) and be faster on large inputs.
+
+Decision: I kept the pairwise approach for now because the app targets small numbers of daily tasks per owner (where O(n^2) is acceptable) and the simpler code is easier to understand and maintain. If the app needs to scale (many tasks or multi-user heavy loads), I would refactor to the sweep-line approach for better performance.
+
 ---
 
 ## 3. AI Collaboration

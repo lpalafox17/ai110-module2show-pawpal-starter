@@ -75,6 +75,7 @@ class TimeSlot:
 class Schedule:
     date: date
     time_slots: List[TimeSlot] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
 
     def generate(self) -> "Schedule":
         raise NotImplementedError()
@@ -106,6 +107,35 @@ class Pet:
         if include_completed:
             return list(self.tasks)
         return [t for t in self.tasks if not t.completed]
+
+    def complete_task(self, task_id: str) -> Optional[PetCareTask]:
+        """Mark a task as completed. If the task is recurring ('daily' or 'weekly'),
+        create and append the next occurrence and return it; otherwise return None.
+        """
+        for t in self.tasks:
+            if t.id == task_id:
+                t.mark_completed()
+                freq = (t.frequency or "").lower()
+                if freq in ("daily", "weekly"):
+                    # compute next scheduled_time using timedelta
+                    offset = timedelta(days=1) if freq == "daily" else timedelta(weeks=1)
+                    if t.scheduled_time:
+                        next_time = t.scheduled_time + offset
+                    else:
+                        next_time = datetime.now() + offset
+                    new_task = PetCareTask(
+                        title=t.title,
+                        duration_minutes=t.duration_minutes,
+                        priority=t.priority,
+                        pet_id=self.id,
+                        notes=t.notes,
+                        frequency=t.frequency,
+                        scheduled_time=next_time,
+                    )
+                    self.tasks.append(new_task)
+                    return new_task
+                return None
+        return None
 
 
 @dataclass
@@ -144,9 +174,14 @@ class Scheduler:
         preferences: Optional[List[Preference]] = None,
         constraints: Optional[List[Constraint]] = None,
     ) -> Schedule:
-        """Produce a Schedule by greedily placing pending tasks into the day."""
-        # Simple greedy scheduler that fills the day sequentially.
-        # Default working window: 08:00 - 20:00
+        """Produce a Schedule by placing tasks into the day.
+
+        Behavior:
+        - If a task has `scheduled_time`, the scheduler will place it at that time.
+        - Otherwise tasks are placed greedily after the running cursor.
+        After building slots, the scheduler runs conflict detection and returns warnings.
+        """
+        # Simple scheduler with support for user-provided scheduled_time
         if not tasks:
             return Schedule(date=date.today(), time_slots=[])
 
@@ -164,21 +199,68 @@ class Scheduler:
 
         for task in pending:
             needed = timedelta(minutes=task.duration_minutes)
-            if cursor + needed > end_dt:
-                # no room left in the day
-                break
-            slot = TimeSlot(start_time=cursor, end_time=cursor + needed, task_id=task.id)
-            slots.append(slot)
-            task.scheduled_time = cursor
-            cursor = cursor + needed
+            if task.scheduled_time:
+                # honor requested scheduled_time
+                start = task.scheduled_time
+                end = start + needed
+                # drop tasks outside the scheduling window
+                if start < start_dt or end > end_dt:
+                    # skip tasks that don't fit in the window
+                    continue
+                slot = TimeSlot(start_time=start, end_time=end, task_id=task.id)
+                slots.append(slot)
+            else:
+                if cursor + needed > end_dt:
+                    # no room left in the day
+                    break
+                slot = TimeSlot(start_time=cursor, end_time=cursor + needed, task_id=task.id)
+                slots.append(slot)
+                task.scheduled_time = cursor
+                cursor = cursor + needed
 
-        return Schedule(date=day, time_slots=slots)
+        schedule = Schedule(date=day, time_slots=slots)
+
+        # build quick lookup of tasks by id for conflict messages
+        tasks_by_id: Dict[str, PetCareTask] = {t.id: t for t in tasks}
+        schedule.warnings = self.detect_conflicts(schedule.time_slots, tasks_by_id)
+        return schedule
 
     def optimize_by_priority(self, tasks: List[PetCareTask]) -> List[PetCareTask]:
         """Return tasks ordered by priority and duration (high/short first)."""
         # Sort by priority (HIGH first), then by duration (shorter first)
         priority_value = {Priority.HIGH: 0, Priority.MEDIUM: 1, Priority.LOW: 2}
         return sorted(tasks, key=lambda t: (priority_value.get(t.priority, 1), t.duration_minutes))
+
+    def sort_by_time(self, tasks: List[PetCareTask]) -> List[PetCareTask]:
+        """Sort tasks by their scheduled_time (earliest first).
+
+        Tasks without a `scheduled_time` are ordered last by treating their
+        key as `datetime.max` so explicit times are prioritized.
+        """
+        def key_fn(t: PetCareTask):
+            # Use scheduled_time (datetime) when present, otherwise a far-future datetime
+            return t.scheduled_time if t.scheduled_time is not None else datetime.max
+
+        return sorted(tasks, key=key_fn)
+
+    def filter_tasks(self, owner: Owner, pet_name: Optional[str] = None, completed: Optional[bool] = None) -> List[PetCareTask]:
+        """Return tasks optionally filtered by `pet_name` and/or completion status.
+
+        Parameters
+        - owner: Owner whose pets/tasks will be searched
+        - pet_name: when provided, only tasks for that pet name are returned
+        - completed: when True/False, filter by completion status; when None, include both
+
+        Returns a list of matching `PetCareTask` objects.
+        """
+        results: List[PetCareTask] = []
+        for p in owner.get_all_pets():
+            if pet_name and p.name != pet_name:
+                continue
+            for t in p.get_tasks(include_completed=True):
+                if completed is None or t.completed == completed:
+                    results.append(t)
+        return results
 
     def schedule_for_owner(
         self,
@@ -194,3 +276,33 @@ class Scheduler:
             # for now we ignore recurrence and date filtering
             pass
         return self.schedule_tasks(tasks, preferences=preferences, constraints=constraints)
+
+    def detect_conflicts(self, slots: List[TimeSlot], tasks_by_id: Dict[str, PetCareTask]) -> List[str]:
+        """Lightweight conflict detection using pairwise interval checks.
+
+        This function returns a list of human-readable warning strings for any
+        overlapping `TimeSlot` pairs. It is intentionally simple (O(n^2)) for
+        readability and because the expected number of daily tasks is small.
+        """
+        warnings: List[str] = []
+        n = len(slots)
+        for i in range(n):
+            a = slots[i]
+            for j in range(i + 1, n):
+                b = slots[j]
+                # overlap if a.start < b.end and b.start < a.end
+                if a.start_time < b.end_time and b.start_time < a.end_time:
+                    ta = tasks_by_id.get(a.task_id)
+                    tb = tasks_by_id.get(b.task_id)
+                    a_title = ta.title if ta else a.task_id
+                    b_title = tb.title if tb else b.task_id
+                    a_pet = ta.pet_id if ta else "?"
+                    b_pet = tb.pet_id if tb else "?"
+                    msg = f"Conflict: '{a_title}' (pet_id={a_pet}) overlaps with '{b_title}' (pet_id={b_pet})"
+                    warnings.append(msg)
+        # deduplicate
+        unique = []
+        for w in warnings:
+            if w not in unique:
+                unique.append(w)
+        return unique
