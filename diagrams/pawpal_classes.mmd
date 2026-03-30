@@ -1,61 +1,75 @@
 classDiagram
 
 class Owner {
-  +UUID owner_id
-  +String name
-  +String contact_info
-  +Preferences preferences
-  +addPet(p: Pet)
-  +removePet(p: Pet)
+  +id: str
+  +name: str
+  +contact_info: str
+  +preferences: List~Preference~
+  +pets: List~Pet~
+  +add_pet(p: Pet)
+  +remove_pet(pet_id: str)
+  +get_all_tasks(): List~PetCareTask~
 }
 
 class Pet {
-  +UUID pet_id
-  +String name
-  +String species
-  +int age
-  +Owner owner
-  +getAge(): int
+  +id: str
+  +name: str
+  +species: str
+  +age: int
+  +owner_id: str
+  +tasks: List~PetCareTask~
+  +add_task(t: PetCareTask)
+  +remove_task(task_id: str)
+  +complete_task(task_id: str): Optional~PetCareTask~
 }
 
 class PetCareTask {
-  +UUID task_id
-  +String title
-  +int duration_minutes
-  +Priority priority
-  +UUID pet_id
-  +String notes
-  +isHighPriority(): bool
-}
-
-class Schedule {
-  +date
-  +list~TimeSlot~ time_slots
-  +generate(): Schedule
-  +explain(): String
+  +id: str
+  +title: str
+  +duration_minutes: int
+  +priority: Priority
+  +pet_id: str
+  +notes: str
+  +scheduled_time: datetime
+  +frequency: str
+  +completed: bool
+  +mark_completed()
 }
 
 class TimeSlot {
-  +start_time
-  +end_time
-  +UUID task_id
-  +String status  "planned|completed|skipped"
+  +start_time: datetime
+  +end_time: datetime
+  +task_id: str
+  +status: str
+}
+
+class Schedule {
+  +date: date
+  +time_slots: List~TimeSlot~
+  +warnings: List~str~
 }
 
 class Preference {
-  +entity_id
-  +list~TimeWindow~ preferred_time_windows
-  +int max_daily_time_minutes
+  +id: str
+  +applies_to: str
+  +entity_id: str
+  +preferred_time_windows: List~TimeWindow~
+  +max_daily_time_minutes: int
 }
 
 class Constraint {
-  +type  "time_budget|unavailable_window|must_after"
-  +parameters
+  +id: str
+  +constraint_type: str
+  +parameters: Dict
 }
 
 class Scheduler {
-  +scheduleTasks(tasks, preferences, constraints): Schedule
-  +optimizeByPriority(): void
+  +schedule_tasks(tasks, preferences=None, constraints=None): Schedule
+  +schedule_for_owner(owner, for_date=None): Schedule
+  +optimize_by_priority(tasks): List~PetCareTask~
+  +sort_by_time(tasks): List~PetCareTask~
+  +filter_tasks(owner, pet_name=None, completed=None): List~PetCareTask~
+  +detect_conflicts(slots, tasks_by_id): List~str~
 }
 
 class Priority {
@@ -70,10 +84,9 @@ Owner "1" *-- "0..*" Pet : owns
 Pet "1" *-- "0..*" PetCareTask : has
 Schedule "1" *-- "0..*" TimeSlot : contains
 TimeSlot "1" --> "1" PetCareTask : assignedTo
-Scheduler ..> PetCareTask : uses
-Scheduler ..> Preference : uses
-Scheduler ..> Constraint : uses
+Scheduler ..> PetCareTask : uses / mutates
+Scheduler ..> Preference : consults
+Scheduler ..> Constraint : consults
 Preference "0..*" o-- "1" Pet : appliesTo
 
-%% Notes
-note for Scheduler "Service that produces a Schedule from tasks, preferences and constraints"
+note for Scheduler "Service that produces a Schedule from tasks, preferences and constraints; provides sorting, filtering, and conflict detection"
